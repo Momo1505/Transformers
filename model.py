@@ -26,9 +26,9 @@ class PositionalEncoding(nn.Module):
         #create the denominator
         denominator = torch.exp(torch.arange(0,d_model,2).float() * (- math.log(10000.0) / d_model))
         #apply the sin to even positions
-        pe[:,0::2] = math.sin(numerator*denominator)
+        pe[:,0::2] = torch.sin(numerator*denominator)
         #apply the cos to the odd position
-        pe[:,1::2] = math.cos(numerator*denominator)
+        pe[:,1::2] = torch.cos(numerator*denominator)
 
         pe = pe.unsqueeze(0) # shape (1,seq_len,d_model)
         self.register_buffer("pe",pe)
@@ -56,13 +56,13 @@ class FeedForwardBlock(nn.Module):
             nn.Linear(d_model,dff),
             nn.ReLU(),
             nn.Dropout(dropout),
-            nn.Linear(dff,d_model) 
+            nn.Linear(dff,d_model)
         )
-    
+
     def forward(self,x):
         # (batch,seq_len,d_model) --> (batch,seq_len,dff) --> (batch,seq_len,d_model)
         return self.feed_forward(x)
-    
+
 class MultiHeadAttentionBlock(nn.Module):
     def __init__(self,d_model:int, h:int, dropout:float):
         super(MultiHeadAttentionBlock,self).__init__()
@@ -112,7 +112,7 @@ class MultiHeadAttentionBlock(nn.Module):
 
         # (batch,seq_len,d_model) --> (batch,seq_len,d_model) 
         return self.w_o(x)
-    
+
 
 class ResidualConnection(nn.Module):
     def __init__(self, dropout:float):
@@ -122,7 +122,7 @@ class ResidualConnection(nn.Module):
 
     def forward(self,x,sublayer):
         return x + self.dropout(sublayer(self.norm(x)))
-    
+
 class EncoderBlock(nn.Module):
     def __init__(self, self_attention_block: MultiHeadAttentionBlock,
                  feed_forward_block: FeedForwardBlock,
@@ -136,18 +136,18 @@ class EncoderBlock(nn.Module):
         x = self.residual_connections[0](x, lambda x: self.self_attention_block(x, x, x, src_mask))
         x = self.residual_connections[1](x,self.feed_forward_block)
         return x
-    
+
 class Encoder(nn.Module):
     def __init__(self,layers : nn.ModuleList):
         super(Encoder,self).__init__()
         self.layers = layers
-        self.norm = LayerNormalization
+        self.norm = LayerNormalization()
 
-    def forward(self,x):
+    def forward(self,x,mask):
         for encoder_block in self.layers:
-            x = encoder_block(x)
+            x = encoder_block(x,mask)
         return self.norm(x)
-    
+
 class DecoderBlock(nn.Module):
     def __init__(self,self_attention_block : MultiHeadAttentionBlock,
                  cross_attention_block : MultiHeadAttentionBlock,
@@ -164,7 +164,7 @@ class DecoderBlock(nn.Module):
         x = self.residual_connections[1](x,lambda x: self.cross_attention_block(x, encoder_output, encoder_output, src_mask))
         x = self.residual_connections[2](x,self.feed_forward_block)
         return x
-    
+
 class Decoder(nn.Module):
     def __init__(self,layers:nn.ModuleList):
         super(Decoder,self).__init__()
@@ -172,11 +172,11 @@ class Decoder(nn.Module):
         self.norm = LayerNormalization()
 
     def forward(self,x,encoder_output,src_mask,tgt_mask):
-        for decoder_block in self.laters:
-            x = decoder_block(x,encoder_output,src_mask,tgt_mask) 
+        for decoder_block in self.layers:
+            x = decoder_block(x,encoder_output,src_mask,tgt_mask)
 
         return self.norm(x)
-    
+
 class ProjectionLayer(nn.Module):
     def __init__(self,d_model:int, vocab_size:int):
         super(ProjectionLayer,self).__init__()
@@ -185,7 +185,7 @@ class ProjectionLayer(nn.Module):
     def forward(self,x):
         # (batch,seq_len,d_model) --> # (batch,seq_len,vocab_size)
         return torch.log_softmax(self.projection(x), dim=-1 )
-    
+
 class Transformer(nn.Module):
     def __init__(self,encoder: Encoder,
                  decoder: Decoder,
@@ -207,15 +207,15 @@ class Transformer(nn.Module):
         x = self.input_embeddings(input)
         x = self.input_position(x)
         return self.encoder(x,input_mask)
-    
+
     def decode(self,encoder_output,src_mask,tgt,tgt_mask):
         tgt = self.target_embeddings(tgt)
         tgt = self.target_position(tgt)
         return self.decoder(tgt,encoder_output,src_mask,tgt_mask)
-    
+
     def project(self,x):
         return self.projection(x)
-    
+
 def build_transformer(
         src_vocab_size : int,
         tgt_vocab_size : int,
@@ -232,8 +232,8 @@ def build_transformer(
     tgt_embedding = InputEmbeddings(d_model,tgt_vocab_size)
 
     # create the positional encoding
-    src_pos = PositionalEncoding(d_model,src_seq_len)
-    tgt_pos = PositionalEncoding(d_model,tgt_seq_len)
+    src_pos = PositionalEncoding(d_model,src_seq_len,dropout)
+    tgt_pos = PositionalEncoding(d_model,tgt_seq_len,dropout)
 
     # create the encoder blocks
     encoder_blocks = []

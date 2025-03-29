@@ -36,7 +36,7 @@ def get_or_build_tokenizer(config, ds, lang):
     return tokenizer
 
 def get_ds(config):
-    ds_raw = load_dataset("opus_books",f"{config["lang_src"]}-{config["lang_tgt"]}",split="train")
+    ds_raw = load_dataset("opus_books",f"{config['lang_src']}-{config['lang_tgt']}",split="train")
 
     #build tokenizers
     src_tokenizer = get_or_build_tokenizer(config,ds_raw,config["lang_src"])
@@ -79,7 +79,7 @@ def train_model(config):
 
     train_dl,val_dl, src_tokenizer, tgt_tokenizer = get_ds(config)
 
-    model = get_model(config, src_tokenizer.get_vocab_size,tgt_tokenizer.get_vocab_size).to(device)
+    model = get_model(config, src_tokenizer.get_vocab_size(),tgt_tokenizer.get_vocab_size()).to(device)
 
     # Tensorboard
     writer = SummaryWriter(config["experiment_name"])
@@ -88,7 +88,7 @@ def train_model(config):
 
     intial_epoch = 0
     global_step = 0
-    
+
     if config["preload"]:
         model_filename = get_weights_file_path(config,config["preload"])
         print(f"Preloading model {model_filename}")
@@ -102,12 +102,12 @@ def train_model(config):
     for epoch in range(intial_epoch,config["num_epochs"]):
         model.train()
 
-        batch_iterator = tqdm(train_dl,desc=f"Processing epoch {epoch:.02d}")
+        batch_iterator = tqdm(train_dl,desc=f"Processing epoch {epoch:02d}")
         for batch in batch_iterator:
-            encoder_input = batch["encoder_input"] # (batch, seq_len)
-            decoder_input = batch["decoder_input"] # (batch, seq_len)
-            encoder_mask = batch["encoder_mask"] # (batch,1,1, seq_len)
-            decoder_mask = batch["decoder_mask"] # (batch,1,seq_len, seq_len)
+            encoder_input = batch["encoder_input"].to(device) # (batch, seq_len)
+            decoder_input = batch["decoder_input"].to(device) # (batch, seq_len)
+            encoder_mask = batch["encoder_mask"].to(device) # (batch,1,1, seq_len)
+            decoder_mask = batch["decoder_mask"].to(device) # (batch,1,seq_len, seq_len)
 
             # run the tensors through the transformer
             encoder_output = model.encode(encoder_input,encoder_mask) # (batch, seq_len, d_model)
