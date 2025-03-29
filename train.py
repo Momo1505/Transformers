@@ -44,15 +44,15 @@ def greedy_decode(model,source,source_mask,src_tokenizer,tgt_tokenizer,max_len,d
 
         decoder_input = torch.cat([
             decoder_input,
-            torch.empty((1,1)).fill_(next_word).type_as(source).to(device)
-        ],dim = 1)
+            next_word.unsqueeze(0)
+        ], dim=1)
 
         if next_word == eos_token:
             break
 
     return decoder_input.squeeze(0)
 
-def run_validation(model,val_ds,src_tokenizer,tgt_tokenizer,max_len,device,print_msg, gloabal_state,writer, num_examples):
+def run_validation(model,val_ds,src_tokenizer,tgt_tokenizer,max_len,device,print_msg, gloabal_state,writer, num_examples=2):
     model.eval()
     count = 0
 
