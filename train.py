@@ -18,6 +18,70 @@ from pathlib import Path
 from tqdm import tqdm
 import warnings
 
+def greedy_decode(model,source,source_mask,src_tokenizer,tgt_tokenizer,max_len,device):
+    sos_token = tgt_tokenizer.token_to_id("[SOS]")
+    eos_token = tgt_tokenizer.token_to_id("[EOS]")
+
+    # compute once the encoder output to be reused later for inference
+    encoder_output = model.encode(source,source_mask)
+
+    # initialize the decoder input with SOS
+    decoder_input = torch.empty((1,1)).fill_(sos_token).type_as(source).to(device)
+    while True:
+        if decoder_input.size(1)==max_len:
+            break
+        # build mask for the decoder input
+        decoder_mask = causal_mask(decoder_input.size(1)).type_as(source).to(device)
+
+        # compute the model output
+        out = model.decode(encoder_output,source_mask,decoder_input,decoder_mask)
+
+        # get the next token
+        proj = model.project(out[:,-1])
+
+        # select the token with max probability
+        _,next_word = torch.max(proj,dim=1)
+
+        decoder_input = torch.cat([
+            decoder_input,
+            torch.empty((1,1)).fill_(next_word).type_as(source).to(device)
+        ],dim = 1)
+
+        if next_word == eos_token:
+            break
+
+    return decoder_input.squeeze(0)
+
+def run_validation(model,val_ds,src_tokenizer,tgt_tokenizer,max_len,device,print_msg, gloabal_state,writer, num_examples):
+    model.eval()
+    count = 0
+
+    console_width = 80
+
+    with torch.no_grad():
+        for batch in val_ds:
+            count+=1
+            encoder_input = batch["encoder_input"].to(device)
+            encoder_mask = batch["encoder_mask"].to(device)
+
+            assert encoder_input.size(0) == 1 , "Batch size must be 1 for validation"
+
+            model_out = greedy_decode(model,encoder_input,encoder_mask,src_tokenizer,tgt_tokenizer,max_len,device)
+
+            source_text = batch["src_text"]
+            target_text = batch["tgt_text"]
+            model_out_text = tgt_tokenizer.decode(model_out.detach().cpu().numpy())
+
+            # print to console
+            print_msg("-"*console_width)
+            print_msg(f"SOURCE: {source_text}")
+            print_msg(f"TARGET: {target_text}")
+            print_msg(f"PREDICTED: {model_out_text}")
+
+            if count == num_examples:
+                break
+
+
 def get_all_sentences(ds,lang):
     for item in ds:
         yield item["translation"][lang]
@@ -100,10 +164,11 @@ def train_model(config):
     loss_fn = nn.CrossEntropyLoss(ignore_index=src_tokenizer.token_to_id("[PAD]"),label_smoothing=0.1).to(device)
 
     for epoch in range(intial_epoch,config["num_epochs"]):
-        model.train()
 
         batch_iterator = tqdm(train_dl,desc=f"Processing epoch {epoch:02d}")
         for batch in batch_iterator:
+            model.train()
+
             encoder_input = batch["encoder_input"].to(device) # (batch, seq_len)
             decoder_input = batch["decoder_input"].to(device) # (batch, seq_len)
             encoder_mask = batch["encoder_mask"].to(device) # (batch,1,1, seq_len)
@@ -133,6 +198,9 @@ def train_model(config):
             optimizer.zero_grad()
 
             global_step +=1
+        
+        run_validation(model,val_dl,src_tokenizer,tgt_tokenizer,config["seq_len"],device, lambda msg: batch_iterator.write(msg), global_step,writer)
+
 
         # save the model
         model_filename = get_weights_file_path(config,f"{epoch:0.2d}")
